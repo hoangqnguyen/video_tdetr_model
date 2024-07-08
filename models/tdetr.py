@@ -47,6 +47,7 @@ class TDETR(pl.LightningModule):
         lr_backbone=1e-5,
         class_loss_coef=1,
         box_loss_coef=5,
+        **kwargs,
     ):
         super().__init__()
         self.backbone = backbone
@@ -131,7 +132,6 @@ class TDETR(pl.LightningModule):
         )
 
         out = {"pred_logits": outputs_class, "pred_boxes": outputs_coord}
-        # print(f"{hs.shape=} {out['pred_boxes'].shape=} {out['pred_logits'].shape=}")
 
         return out
 
@@ -221,7 +221,7 @@ class TDETR(pl.LightningModule):
         loss_class = F.binary_cross_entropy_with_logits(
             pred_logits, target_class)
         # L1 Loss for bounding box coordinates
-        loss_boxes = target_class * F.l1_loss(pred_boxes, target_center_xy)
+        loss_boxes = F.l1_loss(target_class * pred_boxes, target_center_xy)
         # * target_class to mask out the background class
 
         loss = self.class_loss_coef * loss_class + self.box_loss_coef * loss_boxes / (
@@ -242,22 +242,28 @@ class TDETR(pl.LightningModule):
         target_center_xy = targets["center_xy"].to(self.device) * torch.tensor(
             imgsz, device=self.device
         )
-        distance = torch.norm(pred_boxes - target_center_xy, dim=-1)
-        return distance.mean()
+        distance = torch.norm(pred_boxes - target_center_xy, dim=-1).flatten()
+        return distance
 
     def evaluate(self, dataloader, imgsz):
         self.eval()
+        all_distance = torch.empty(0)
         total_error = 0.0
-        i = 1
+        thresholds = torch.arange(11)
+        count = 0
         with torch.no_grad():
             for batch in dataloader:
                 inputs, targets = self.decompose(batch)
                 outputs = self(inputs.to(self.device))
-                error = self.compute_location_error(outputs, targets, imgsz)
-                total_error += error.item()
-                i += 1
-        avg_error = total_error / i
-        print(f"Evaluation error: {avg_error}")
+                distance = self.compute_location_error(outputs, targets, imgsz).cpu()
+                all_distance = torch.cat((all_distance, distance))
+                total_error += distance.sum().item()
+                count += distance.numel()
+        avg_error = total_error / count
+        for th in thresholds:
+            acc = (all_distance <= th).sum() / count
+            print(f"Accuracy @ {th}: {acc:.2%}")
+        print(f"Mean distance error: {avg_error}")
         self.train()
         return avg_error
 

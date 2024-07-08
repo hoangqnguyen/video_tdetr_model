@@ -1,7 +1,8 @@
-import argparse
 import os
-from datetime import datetime
 import json
+import warnings
+import argparse
+from datetime import datetime
 from models import build_model
 import pytorch_lightning as pl
 from datasets import build_dataset
@@ -9,10 +10,13 @@ from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 
+warnings.filterwarnings('ignore')
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train model")
-
+    parser.add_argument("--mode", type=str, default="train",
+                        help="Mode (train/eval)", choices=["train", "eval"])
+    
     # Dataset parameters
     parser.add_argument(
         "--dataset", type=str, default="kovo_video", help="Dataset name"
@@ -27,9 +31,12 @@ def parse_args():
     parser.add_argument(
         "--imgsz", type=int, nargs=2, default=(256, 256), help="Image size"
     )
-    parser.add_argument("--n_frames", type=int, default=4, help="Number of frames")
-    parser.add_argument("--epoch_size", type=int, default=4, help="Size of each epoch")
-    parser.add_argument("--random_seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--n_frames", type=int, default=4,
+                        help="Number of frames")
+    parser.add_argument("--epoch_size", type=int,
+                        default=4, help="Size of each epoch")
+    parser.add_argument("--random_seed", type=int,
+                        default=42, help="Random seed")
 
     parser.add_argument(
         "--calculate_velocity", action="store_true", help="Calculate velocity"
@@ -46,15 +53,18 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
 
     # Model parameters
-    parser.add_argument("--model_name", type=str, default="tdetr", help="Model name")
-    parser.add_argument("--device", type=str, default="cuda", help="Device to use")
+    parser.add_argument("--model_name", type=str,
+                        default="tdetr", help="Model name", choices=["tdetr", "tdetr2"])
+    parser.add_argument("--device", type=str,
+                        default="cuda", help="Device to use")
     parser.add_argument(
         "--position_embedding", type=str, default="sine", help="Position embedding type"
     )
     parser.add_argument(
         "--hidden_dim", type=int, default=256, help="Hidden dimension size"
     )
-    parser.add_argument("--optimizer", type=str, default="adam", help="Optimizer")
+    parser.add_argument("--optimizer", type=str,
+                        default="adam", help="Optimizer")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument(
         "--lr_backbone", type=float, default=1e-5, help="Learning rate for backbone"
@@ -66,9 +76,12 @@ def parse_args():
     parser.add_argument(
         "--dilation", action="store_true", help="Use dilated convolutions"
     )
-    parser.add_argument("--epochs", type=int, default=2, help="Number of epochs")
-    parser.add_argument("--num_queries", type=int, default=3, help="Number of queries")
-    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
+    parser.add_argument("--epochs", type=int, default=2,
+                        help="Number of epochs")
+    parser.add_argument("--num_queries", type=int,
+                        default=3, help="Number of queries")
+    parser.add_argument("--dropout", type=float,
+                        default=0.1, help="Dropout rate")
     parser.add_argument(
         "--nheads", type=int, default=8, help="Number of attention heads"
     )
@@ -101,6 +114,20 @@ def parse_args():
         help="Number of batches to accumulate gradients",
     )
 
+    parser.add_argument(
+        "--eval_checkpoint_path",
+        type=str,
+        default=None,
+        help="Path to the checkpoint to evaluate",
+    )
+
+    parser.add_argument(
+        "--log_subfix",
+        type=str,
+        default="",
+        help="Subfix to add to the log directory name",
+    )
+
     # * Loss coefficients
     parser.add_argument("--class_loss_coef", default=1, type=float)
     parser.add_argument("--box_loss_coef", default=5, type=float)
@@ -108,73 +135,81 @@ def parse_args():
 
 
 def main(args):
-    # Get the current timestamp
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-
-    # Create logging and checkpoint directories
-    log_dir = os.path.join("logs", f"{args.model_name}_{args.dataset}_{timestamp}")
-    checkpoint_dir = os.path.join(
-        "checkpoints", f"{args.model_name}_{args.dataset}_{timestamp}"
-    )
-    os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-
-    # Save args to log and checkpoint directories
-    with open(os.path.join(checkpoint_dir, "args.json"), "w") as f:
-        json.dump(vars(args), f, indent=4)
-
-    train_dataset = build_dataset(args.dataset, "train", args)
-    val_dataset = build_dataset(args.dataset, "val", args)
+    model = build_model(args)
     test_dataset = build_dataset(args.dataset, "test", args)
-
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=args.batch_size, num_workers=args.num_workers
-    )
-    val_dataloader = DataLoader(
-        val_dataset, batch_size=args.batch_size, num_workers=args.num_workers
-    )
     test_dataloader = DataLoader(
         test_dataset, batch_size=args.batch_size, num_workers=args.num_workers
     )
 
-    tb_logger = pl_loggers.TensorBoardLogger(
-        save_dir=log_dir, name=args.model_name, sub_dir=args.dataset
-    )
-    # csv_logger = pl_loggers.CSVLogger(save_dir=log_dir, name=args.model_name)
+    if args.mode == "train":
+        # Get the current timestamp
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    model = build_model(args)
+        # Create logging and checkpoint directories
+        subfix = args.log_subfix + "_" if args.log_subfix else ""
+        log_dir = os.path.join(
+            "logs", f"{args.model_name}_{subfix}{args.dataset}_{timestamp}")
+        checkpoint_dir = os.path.join(
+            "checkpoints", f"{args.model_name}_{subfix}{args.dataset}_{timestamp}"
+        )
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
-    # Checkpoint callback
-    checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",
-        dirpath=checkpoint_dir,
-        filename=f"{args.model_name}_{args.dataset}_{timestamp}",
-        save_top_k=1,
-        mode="min",
-    )
+        # Save args to log and checkpoint directories
+        with open(os.path.join(checkpoint_dir, "args.json"), "w") as f:
+            json.dump(vars(args), f, indent=4)
 
-    trainer = pl.Trainer(
-        max_epochs=args.epochs,
-        accelerator=args.device,
-        logger=[
-            tb_logger,
-            # csv_logger
-        ],
-        callbacks=[
-            checkpoint_callback,
-        ],
-        accumulate_grad_batches=args.accumulate_grad_batches,
-    )
+        train_dataset = build_dataset(args.dataset, "train", args)
+        val_dataset = build_dataset(args.dataset, "val", args)
 
-    trainer.fit(
-        model,
-        train_dataloader,
-        val_dataloader,
-    )
+        train_dataloader = DataLoader(
+            train_dataset, batch_size=args.batch_size, num_workers=args.num_workers
+        )
+        val_dataloader = DataLoader(
+            val_dataset, batch_size=args.batch_size, num_workers=args.num_workers
+        )
+
+        tb_logger = pl_loggers.TensorBoardLogger(
+            save_dir=log_dir, name=args.model_name, sub_dir=args.dataset
+        )
+        # csv_logger = pl_loggers.CSVLogger(save_dir=log_dir, name=args.model_name)
+
+        # Checkpoint callback
+        checkpoint_callback = ModelCheckpoint(
+            monitor="val_loss",
+            dirpath=checkpoint_dir,
+            filename=f"{args.model_name}_{args.dataset}_{timestamp}",
+            save_top_k=1,
+            mode="min",
+        )
+
+        trainer = pl.Trainer(
+            max_epochs=args.epochs,
+            accelerator=args.device,
+            logger=[
+                tb_logger,
+                # csv_logger
+            ],
+            callbacks=[
+                checkpoint_callback,
+            ],
+            accumulate_grad_batches=args.accumulate_grad_batches,
+        )
+
+        trainer.fit(
+            model,
+            train_dataloader,
+            val_dataloader,
+        )
+        args.eval_checkpoint_path = checkpoint_callback.best_model_path
 
     # Evaluate the model
+    eval(model, args.eval_checkpoint_path, test_dataloader, args)
+
+
+def eval(model, checkpoint_dir, test_dataloader, args):
     best_model = model.__class__.load_from_checkpoint(
-        checkpoint_callback.best_model_path,
+        checkpoint_dir,
         backbone=model.backbone,
         transformer=model.transformer,
         num_queries=model.num_queries,
