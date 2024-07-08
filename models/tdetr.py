@@ -189,18 +189,18 @@ class TDETR(pl.LightningModule):
     def configure_optimizers(self):
         params = [
                 {"params": self.backbone.parameters(), "lr": self.lr_backbone},
-                {"params": self.transformer.parameters(), "lr": self.lr},
-                {"params": self.input_proj.parameters(), "lr": self.lr},
-                {"params": self.class_embed.parameters(), "lr": self.lr},
-                {"params": self.location_emb.parameters(), "lr": self.lr},,
-                {"params": self.query_embed.parameters(), "lr": self.lr},
+                {"params": self.transformer.parameters()},
+                {"params": self.input_proj.parameters()},
+                {"params": self.class_embed.parameters()},
+                {"params": self.location_emb.parameters()},
+                {"params": self.query_embed.parameters()},
             ]
         if self.optimizer == "adam":
-            optimizer = torch.optim.Adam(params)
+            optimizer = torch.optim.Adam(params, lr=self.lr)
         elif self.optimizer == "adamw":
-            optimizer = torch.optim.AdamW(params)
+            optimizer = torch.optim.AdamW(params, lr=self.lr)
         elif self.optimizer == "sgd":
-            optimizer = torch.optim.SGD(params, momentum=0.9)
+            optimizer = torch.optim.SGD(params, lr=self.lr, momentum=0.9)
 
         return optimizer
 
