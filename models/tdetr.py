@@ -93,15 +93,18 @@ class TDETR(pl.LightningModule):
         b = bt // self.n_frames
         t = self.n_frames
         features, pos = self.backbone(x)
-        src, mask = features[-1].decompose()  # src should be: (b*t, c, h, w) now
+        # src should be: (b*t, c, h, w) now
+        src, mask = features[-1].decompose()
 
         src = rearrange(src, "(b t) c h w -> b (t c) h w", b=b)
         src = self.input_proj(src)  # src should be: (b, t*c, h, w)
         c, h, w = src.shape[1:]
         if self.temp_enc is not None:
-            src = rearrange(src, "b (t c) h w -> t b (h w c)", b=b, t=t, h=h, w=w)
+            src = rearrange(src, "b (t c) h w -> t b (h w c)",
+                            b=b, t=t, h=h, w=w)
             src = self.temp_enc(src)
-            src = rearrange(src, "t b (h w c) -> b (t c) h w", b=b, t=t, h=h, w=w)
+            src = rearrange(src, "t b (h w c) -> b (t c) h w",
+                            b=b, t=t, h=h, w=w)
 
             mask = (
                 rearrange(mask, "(b t) h w -> b t h w", b=b)
@@ -109,7 +112,8 @@ class TDETR(pl.LightningModule):
                 .mean(dim=1)
                 .to(torch.bool)
             )
-            pos[-1] = rearrange(pos[-1], "(b t) c h w -> b t c h w", b=b).mean(dim=1)
+            pos[-1] = rearrange(pos[-1],
+                                "(b t) c h w -> b t c h w", b=b).mean(dim=1)
             # print(f"{src.shape=}, {mask.shape=}, {pos[-1].shape=}")
 
         hs = self.transformer(src, mask, self.query_embed.weight, pos[-1])[0]
@@ -142,7 +146,8 @@ class TDETR(pl.LightningModule):
             .unsqueeze(-1)
         )
         center_xy = (
-            batch["center_xy"].flatten(0, 1).unsqueeze(1).repeat(1, self.num_queries, 1)
+            batch["center_xy"].flatten(0, 1).unsqueeze(
+                1).repeat(1, self.num_queries, 1)
         )
         if frames.dim() < 5:
             frames = frames.unsqueeze(0)
@@ -188,13 +193,13 @@ class TDETR(pl.LightningModule):
 
     def configure_optimizers(self):
         params = [
-                {"params": self.backbone.parameters(), "lr": self.lr_backbone},
-                {"params": self.transformer.parameters()},
-                {"params": self.input_proj.parameters()},
-                {"params": self.class_embed.parameters()},
-                {"params": self.location_emb.parameters()},
-                {"params": self.query_embed.parameters()},
-            ]
+            {"params": self.backbone.parameters(), "lr": self.lr_backbone},
+            {"params": self.transformer.parameters()},
+            {"params": self.input_proj.parameters()},
+            {"params": self.class_embed.parameters()},
+            {"params": self.location_emb.parameters()},
+            {"params": self.query_embed.parameters()},
+        ]
         if self.optimizer == "adam":
             optimizer = torch.optim.Adam(params, lr=self.lr)
         elif self.optimizer == "adamw":
@@ -213,9 +218,10 @@ class TDETR(pl.LightningModule):
         target_center_xy = targets["center_xy"]
 
         # Cross Entropy Loss for classification
-        loss_class = F.binary_cross_entropy_with_logits(pred_logits, target_class)
+        loss_class = F.binary_cross_entropy_with_logits(
+            pred_logits, target_class)
         # L1 Loss for bounding box coordinates
-        loss_boxes = F.l1_loss(target_class * pred_boxes, target_center_xy)
+        loss_boxes = target_class * F.l1_loss(pred_boxes, target_center_xy)
         # * target_class to mask out the background class
 
         loss = self.class_loss_coef * loss_class + self.box_loss_coef * loss_boxes / (
