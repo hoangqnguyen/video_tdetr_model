@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from datasets import build_dataset
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import RichProgressBar, ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 
 def parse_args():
@@ -27,12 +27,10 @@ def parse_args():
     parser.add_argument(
         "--imgsz", type=int, nargs=2, default=(256, 256), help="Image size"
     )
-    parser.add_argument("--n_frames", type=int, default=5, help="Number of frames")
+    parser.add_argument("--n_frames", type=int, default=4, help="Number of frames")
     parser.add_argument("--epoch_size", type=int, default=4, help="Size of each epoch")
     parser.add_argument("--random_seed", type=int, default=42, help="Random seed")
-    parser.add_argument(
-        "--normalize_labels", action="store_true", help="Normalize labels"
-    )
+
     parser.add_argument(
         "--calculate_velocity", action="store_true", help="Calculate velocity"
     )
@@ -62,7 +60,7 @@ def parse_args():
     )
     parser.add_argument("--masks", action="store_true", help="Use masks")
     parser.add_argument(
-        "--backbone", type=str, default="resnet50", help="Backbone model"
+        "--backbone", type=str, default="resnet18", help="Backbone model"
     )
     parser.add_argument(
         "--dilation", action="store_true", help="Use dilated convolutions"
@@ -108,28 +106,15 @@ def parse_args():
     return parser.parse_args()
 
 
-class CustomProgressBar(RichProgressBar):
-    def __init__(self, args):
-        super().__init__()
-        self.total_steps = args.epoch_size // 2
-
-    def on_train_epoch_start(self, trainer, pl_module):
-        self.main_progress_bar.reset(total=self.total_steps)
-
-    def get_metrics(self, *args, **kwargs):
-        # don't show the version number
-        items = super().get_metrics(*args, **kwargs)
-        items.pop("v_num", None)
-        return items
-
-
 def main(args):
     # Get the current timestamp
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     # Create logging and checkpoint directories
-    log_dir = os.path.join("logs", f"{args.model_name}_{timestamp}")
-    checkpoint_dir = os.path.join("checkpoints", f"{args.model_name}_{timestamp}")
+    log_dir = os.path.join("logs", f"{args.model_name}_{args.dataset}_{timestamp}")
+    checkpoint_dir = os.path.join(
+        "checkpoints", f"{args.model_name}_{args.dataset}_{timestamp}"
+    )
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -151,8 +136,10 @@ def main(args):
         test_dataset, batch_size=args.batch_size, num_workers=args.num_workers
     )
 
-    tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_dir, name=args.model_name)
-    csv_logger = pl_loggers.CSVLogger(save_dir=log_dir, name=args.model_name)
+    tb_logger = pl_loggers.TensorBoardLogger(
+        save_dir=log_dir, name=args.model_name, sub_dir=args.dataset
+    )
+    # csv_logger = pl_loggers.CSVLogger(save_dir=log_dir, name=args.model_name)
 
     model = build_model(args)
 
@@ -160,16 +147,18 @@ def main(args):
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         dirpath=checkpoint_dir,
-        filename=f"{args.model_name}_{timestamp}",
+        filename=f"{args.model_name}_{args.dataset}_{timestamp}",
         save_top_k=1,
         mode="min",
     )
-    progress_bar = CustomProgressBar(args)
 
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         accelerator=args.device,
-        logger=[tb_logger, csv_logger],
+        logger=[
+            tb_logger,
+            # csv_logger
+        ],
         callbacks=[
             checkpoint_callback,
         ],

@@ -62,31 +62,72 @@ class TDETR(pl.LightningModule):
         else:
             self.temp_enc = None
         hidden_dim = transformer.d_model
+        self.in_features_dim = backbone.num_channels * n_frames
 
-        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
-        self.class_embed = nn.Linear(hidden_dim, 1)
-        self.location_emb = nn.Linear(hidden_dim, 2)
+        self.input_proj = nn.Conv2d(
+            self.in_features_dim, hidden_dim, kernel_size=1, groups=n_frames
+        )
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
+        # self.class_embed = nn.Linear(hidden_dim, 1)
+        # self.location_emb = nn.Linear(hidden_dim, 2)
+        self.class_embed = nn.Conv1d(hidden_dim, n_frames, kernel_size=1)
+        self.location_emb = nn.Conv1d(hidden_dim, n_frames * 2, kernel_size=1)
+        self._init_weights()
+
+    def _init_conv(self, conv):
+        nn.init.kaiming_normal_(conv.weight, mode="fan_out", nonlinearity="relu")
+        if conv.bias is not None:
+            nn.init.constant_(conv.bias, 0)
+
+    def _int_embedding(self, emb):
+        nn.init.xavier_uniform_(emb.weight)
+
+    def _init_weights(self):
+        self._init_conv(self.input_proj)
+        self._int_embedding(self.query_embed)
+        self._init_conv(self.class_embed)
+        self._init_conv(self.location_emb)
 
     def forward(self, x: NestedTensor):
         bt = x.tensors.shape[0]
         b = bt // self.n_frames
         t = self.n_frames
         features, pos = self.backbone(x)
-        src, mask = features[-1].decompose()
-        src = self.input_proj(src)
+        src, mask = features[-1].decompose()  # src should be: (b*t, c, h, w) now
+
+        src = rearrange(src, "(b t) c h w -> b (t c) h w", b=b)
+        src = self.input_proj(src)  # src should be: (b, t*c, h, w)
         c, h, w = src.shape[1:]
         if self.temp_enc is not None:
-            src = rearrange(src, "(b t) c h w -> t b (h w c)", b=b, t=t, h=h, w=w, c=c)
+            src = rearrange(src, "b (t c) h w -> t b (h w c)", b=b, t=t, h=h, w=w)
             src = self.temp_enc(src)
-            src = rearrange(src, "t b (h w c) -> (b t) c h w", b=b, t=t, h=h, w=w, c=c)
+            src = rearrange(src, "t b (h w c) -> b (t c) h w", b=b, t=t, h=h, w=w)
+
+            mask = (
+                rearrange(mask, "(b t) h w -> b t h w", b=b)
+                .to(torch.float32)
+                .mean(dim=1)
+                .to(torch.bool)
+            )
+            pos[-1] = rearrange(pos[-1], "(b t) c h w -> b t c h w", b=b).mean(dim=1)
+            # print(f"{src.shape=}, {mask.shape=}, {pos[-1].shape=}")
 
         hs = self.transformer(src, mask, self.query_embed.weight, pos[-1])[0]
+
+        hs = rearrange(hs[-1], "b q c -> b c q", b=b, q=self.num_queries)
 
         outputs_class = self.class_embed(hs)
         outputs_coord = self.location_emb(hs).sigmoid()
 
-        out = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord[-1]}
+        outputs_class = rearrange(
+            outputs_class, "b (t c) q -> (b t) q c", q=self.num_queries, t=t
+        )
+        outputs_coord = rearrange(
+            outputs_coord, "b (t c) q -> (b t) q c", q=self.num_queries, t=t
+        )
+
+        out = {"pred_logits": outputs_class, "pred_boxes": outputs_coord}
+        # print(f"{hs.shape=} {out['pred_boxes'].shape=} {out['pred_logits'].shape=}")
 
         return out
 
@@ -131,7 +172,7 @@ class TDETR(pl.LightningModule):
         loss_dict = self.compute_loss(outputs, targets)
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
             logger=True,

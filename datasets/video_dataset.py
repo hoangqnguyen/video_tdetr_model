@@ -17,20 +17,24 @@ def load_json(json_path):
     return data
 
 
-def in_split(label_path, split_videos):
-    video_name = os.path.basename(label_path).split("_")[1]
-    # print (split_videos)
+def in_split(label_path, split_videos, dataset_name):
+    if dataset_name == "volleyball":
+        video_name = os.path.basename(label_path).split("_")[0]
+    elif dataset_name == "kovo_video":
+        video_name = os.path.basename(label_path).split("_")[1]
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}")
     return video_name in map(str, split_videos)
 
 
-def get_samples(data_path, split):
+def get_samples(data_path, split, dataset_name):
     split_dict = load_json(os.path.join(data_path, "split.json"))
     split_videos = split_dict[split]
     labels = sorted(
         [
             label_path
             for label_path in glob.glob(os.path.join(data_path, "*.txt"))
-            if in_split(label_path, split_videos)
+            if in_split(label_path, split_videos, dataset_name)
         ]
     )
     videos = [label.replace(".txt", ".mp4") for label in labels]
@@ -50,7 +54,6 @@ def load_label(
 
     start_idx = start_idx or 0
     end_idx = end_idx or labels.shape[0]
-    n_frames = end_idx - start_idx
 
     labels = labels[start_idx:end_idx]
 
@@ -107,22 +110,23 @@ def load_label(
     return output_labels
 
 
-class KOVOVideoDataset(torch.utils.data.IterableDataset):
+class VideoDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
         data_path,
         split,
+        dataset_name,
         n_frames=5,
         epoch_size=None,
         frame_transform=None,
         video_transform=None,
         random_seed=42,
-        normalize_labels=False,
+        normalize_labels=True,
         calculate_velocity=False,
         return_frame_resolution=True,
         return_bbox_size=True,
     ):
-        self.samples = get_samples(data_path, split)
+        self.samples = get_samples(data_path, split, dataset_name)
         self.normalize_labels = normalize_labels
         self.calculate_velocity = calculate_velocity
         self.return_frame_resolution = return_frame_resolution
@@ -187,7 +191,15 @@ def frame_transform(split, args):
                 v2.ToImage(),
                 v2.ToDtype(torch.uint8, scale=True),
                 v2.Resize(args.imgsz),
-                # v2.ColorJitter(brightness=0.4, contrast=0.5, saturation=0.4, hue=0.3),
+                v2.RandomApply(
+                    [
+                        v2.ColorJitter(
+                            brightness=0.4, contrast=0.5, saturation=0.4, hue=0.3
+                        ),
+                        v2.RandomAdjustSharpness(sharpness_factor=10, p=0.8),
+                        v2.GaussianBlur(kernel_size=(11, 21), sigma=(5, 50)),
+                    ]
+                ),
                 v2.ToDtype(torch.float32, scale=True),
                 v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
             ]
@@ -198,7 +210,6 @@ def frame_transform(split, args):
                 v2.ToImage(),
                 v2.ToDtype(torch.uint8, scale=True),
                 v2.Resize(args.imgsz),
-                # v2.ColorJitter(brightness=0.4, contrast=0.5, saturation=0.4, hue=0.3),
                 v2.ToDtype(torch.float32, scale=True),
                 v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
             ]
@@ -208,15 +219,15 @@ def frame_transform(split, args):
 
 def build(split, args):
 
-    return KOVOVideoDataset(
+    return VideoDataset(
         data_path=args.data_path,
+        dataset_name=args.dataset,
         split=split,
         n_frames=args.n_frames,
         epoch_size=args.epoch_size,
         frame_transform=frame_transform(split, args),
         # video_transform=args.video_transform,
         random_seed=args.random_seed,
-        normalize_labels=args.normalize_labels,
         calculate_velocity=args.calculate_velocity,
         return_frame_resolution=args.return_frame_resolution,
         return_bbox_size=args.return_bbox_size,
