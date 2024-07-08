@@ -42,6 +42,7 @@ class TDETR(pl.LightningModule):
         num_queries,
         n_frames,
         use_temporal_encodings=True,
+        optimizer="adam",
         lr=1e-4,
         lr_backbone=1e-5,
         class_loss_coef=1,
@@ -52,6 +53,7 @@ class TDETR(pl.LightningModule):
         self.transformer = transformer
         self.n_frames = n_frames
         self.num_queries = num_queries
+        self.optimizer = optimizer
         self.lr = lr
         self.lr_backbone = lr_backbone
         self.class_loss_coef = class_loss_coef
@@ -68,14 +70,12 @@ class TDETR(pl.LightningModule):
             self.in_features_dim, hidden_dim, kernel_size=1, groups=n_frames
         )
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
-        # self.class_embed = nn.Linear(hidden_dim, 1)
-        # self.location_emb = nn.Linear(hidden_dim, 2)
         self.class_embed = nn.Conv1d(hidden_dim, n_frames, kernel_size=1)
         self.location_emb = nn.Conv1d(hidden_dim, n_frames * 2, kernel_size=1)
         self._init_weights()
 
     def _init_conv(self, conv):
-        nn.init.kaiming_normal_(conv.weight, mode="fan_out", nonlinearity="relu")
+        nn.init.normal_(conv.weight, std=0.01, mean=0.0)
         if conv.bias is not None:
             nn.init.constant_(conv.bias, 0)
 
@@ -187,17 +187,21 @@ class TDETR(pl.LightningModule):
         return loss_dict["loss"]
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            [
+        params = [
                 {"params": self.backbone.parameters(), "lr": self.lr_backbone},
-                {"params": self.transformer.parameters()},
-                {"params": self.input_proj.parameters()},
-                {"params": self.class_embed.parameters()},
-                {"params": self.location_emb.parameters()},
-                {"params": self.query_embed.parameters()},
-            ],
-            lr=self.lr,
-        )
+                {"params": self.transformer.parameters(), "lr": self.lr},
+                {"params": self.input_proj.parameters(), "lr": self.lr},
+                {"params": self.class_embed.parameters(), "lr": self.lr},
+                {"params": self.location_emb.parameters(), "lr": self.lr},,
+                {"params": self.query_embed.parameters(), "lr": self.lr},
+            ]
+        if self.optimizer == "adam":
+            optimizer = torch.optim.Adam(params)
+        elif self.optimizer == "adamw":
+            optimizer = torch.optim.AdamW(params)
+        elif self.optimizer == "sgd":
+            optimizer = torch.optim.SGD(params, momentum=0.9)
+
         return optimizer
 
     def compute_loss(self, outputs, targets):
@@ -261,6 +265,7 @@ def build_model(args):
         num_queries=args.num_queries,
         n_frames=args.n_frames,
         use_temporal_encodings=args.use_temporal_encodings,
+        optimizer=args.optimizer,
         lr=args.lr,
         lr_backbone=args.lr_backbone,
     )

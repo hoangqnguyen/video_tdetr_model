@@ -54,6 +54,7 @@ def parse_args():
     parser.add_argument(
         "--hidden_dim", type=int, default=256, help="Hidden dimension size"
     )
+    parser.add_argument("--optimizer", type=str, default="adam", help="Optimizer")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument(
         "--lr_backbone", type=float, default=1e-5, help="Learning rate for backbone"
