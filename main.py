@@ -6,25 +6,37 @@ from datetime import datetime
 from models import build_model
 import pytorch_lightning as pl
 from datasets import build_dataset
+
 # from datasets.helpers import collate_fn
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train model")
-    parser.add_argument("--mode", type=str, default="train",
-                        help="Mode (train/eval)", choices=["train", "eval"])
-    
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="train",
+        help="Mode (train/eval)",
+        choices=["train", "eval"],
+    )
+
     # Dataset parameters
     parser.add_argument(
         "--dataset", type=str, default="kovo_video", help="Dataset name"
     )
 
-    parser.add_argument("--dataset_mode", type=str, default="full",
-                        help="Dataset mode", choices=["full", "iter"])
+    parser.add_argument(
+        "--dataset_mode",
+        type=str,
+        default="full",
+        help="Dataset mode",
+        choices=["full", "iter"],
+    )
 
     parser.add_argument(
         "--data_path",
@@ -35,12 +47,11 @@ def parse_args():
     parser.add_argument(
         "--imgsz", type=int, nargs=2, default=(256, 256), help="Image size"
     )
-    parser.add_argument("--n_frames", type=int, default=4,
-                        help="Number of frames")
-    parser.add_argument("--epoch_size", type=int,
-                        default=None, help="Size of each epoch")
-    parser.add_argument("--random_seed", type=int,
-                        default=42, help="Random seed")
+    parser.add_argument("--n_frames", type=int, default=4, help="Number of frames")
+    parser.add_argument(
+        "--epoch_size", type=int, default=None, help="Size of each epoch"
+    )
+    parser.add_argument("--random_seed", type=int, default=42, help="Random seed")
 
     parser.add_argument(
         "--calculate_velocity", action="store_true", help="Calculate velocity"
@@ -57,18 +68,21 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
 
     # Model parameters
-    parser.add_argument("--model_name", type=str,
-                        default="tdetr", help="Model name", choices=["tdetr", "tdetr2"])
-    parser.add_argument("--device", type=str,
-                        default="cuda", help="Device to use")
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="tdetr",
+        help="Model name",
+        choices=["tdetr", "tdetr2"],
+    )
+    parser.add_argument("--device", type=str, default="cuda", help="Device to use")
     parser.add_argument(
         "--position_embedding", type=str, default="sine", help="Position embedding type"
     )
     parser.add_argument(
         "--hidden_dim", type=int, default=256, help="Hidden dimension size"
     )
-    parser.add_argument("--optimizer", type=str,
-                        default="adam", help="Optimizer")
+    parser.add_argument("--optimizer", type=str, default="adam", help="Optimizer")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument(
         "--lr_backbone", type=float, default=1e-5, help="Learning rate for backbone"
@@ -80,12 +94,9 @@ def parse_args():
     parser.add_argument(
         "--dilation", action="store_true", help="Use dilated convolutions"
     )
-    parser.add_argument("--epochs", type=int, default=2,
-                        help="Number of epochs")
-    parser.add_argument("--num_queries", type=int,
-                        default=3, help="Number of queries")
-    parser.add_argument("--dropout", type=float,
-                        default=0.1, help="Dropout rate")
+    parser.add_argument("--epochs", type=int, default=2, help="Number of epochs")
+    parser.add_argument("--num_queries", type=int, default=3, help="Number of queries")
+    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     parser.add_argument(
         "--nheads", type=int, default=8, help="Number of attention heads"
     )
@@ -141,7 +152,9 @@ def parse_args():
 def main(args):
     test_dataset = build_dataset(args.dataset, "test", args)
     test_dataloader = DataLoader(
-        test_dataset, batch_size=args.batch_size, num_workers=args.num_workers,
+        test_dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
         # collate_fn=collate_fn
     )
 
@@ -153,7 +166,8 @@ def main(args):
         # Create logging and checkpoint directories
         subfix = args.log_subfix + "_" if args.log_subfix else ""
         log_dir = os.path.join(
-            "logs", f"{args.model_name}_{subfix}{args.dataset}_{timestamp}")
+            "logs", f"{args.model_name}_{subfix}{args.dataset}_{timestamp}"
+        )
         checkpoint_dir = os.path.join(
             "checkpoints", f"{args.model_name}_{subfix}{args.dataset}_{timestamp}"
         )
@@ -167,12 +181,25 @@ def main(args):
         train_dataset = build_dataset(args.dataset, "train", args)
         val_dataset = build_dataset(args.dataset, "val", args)
 
-        train_dataloader = DataLoader(
-            train_dataset, batch_size=args.batch_size, num_workers=args.num_workers,
-            # collate_fn=collate_fn
-        )
+        if args.dataset_mode == "iter":
+            train_dataloader = DataLoader(
+                train_dataset,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                # collate_fn=collate_fn
+            )
+        elif args.dataset_mode == "full":
+            train_dataloader = DataLoader(
+                train_dataset,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                shuffle=True,
+                # collate_fn=collate_fn
+            )
         val_dataloader = DataLoader(
-            val_dataset, batch_size=args.batch_size, num_workers=args.num_workers,
+            val_dataset,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
             # collate_fn=collate_fn
         )
 
@@ -212,8 +239,17 @@ def main(args):
 
     elif args.mode == "eval":
         # read args from checkpoint dir
-        with open(os.path.join(os.path.dirname(args.eval_checkpoint_path), "args.json"), "r") as f:
-            skip_keys = ["mode", "eval_checkpoint_path", "dataset", "data_path", "epoch_size", "batch_size"]
+        with open(
+            os.path.join(os.path.dirname(args.eval_checkpoint_path), "args.json"), "r"
+        ) as f:
+            skip_keys = [
+                "mode",
+                "eval_checkpoint_path",
+                "dataset",
+                "data_path",
+                "epoch_size",
+                "batch_size",
+            ]
             args.__dict__.update(
                 {k: v for k, v in json.load(f).items() if k not in skip_keys}
             )

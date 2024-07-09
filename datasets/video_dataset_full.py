@@ -45,12 +45,24 @@ class VideoDataset(torch.utils.data.Dataset):
             for video_path, _ in self.samples
         )
 
+        self.video_cache = {}  # Cache to store loaded videos
+
     def __len__(self):
         return self.total_frames - len(self.samples) * (self.n_frames - 1)
 
+    def _load_video(self, video_path):
+        """Helper function to load video into memory."""
+        if video_path in self.video_cache:
+            return self.video_cache[video_path]
+
+        vid = torchvision.io.VideoReader(video_path, "video")
+        self.video_cache[video_path] = vid
+        return vid
+
     def __getitem__(self, idx):
         for video_path, label_path in self.samples:
-            vid = torchvision.io.VideoReader(video_path, "video")
+            vid = self._load_video(video_path)
+            # vid = torchvision.io.VideoReader(video_path, "video")
             metadata = vid.get_metadata()
             duration = metadata["video"]["duration"][0]
             fps = metadata["video"]["fps"][0]
@@ -76,7 +88,7 @@ class VideoDataset(torch.utils.data.Dataset):
                     ]
                     video_frames.extend(padding_frames)
 
-                video_frames = video_frames[:self.n_frames]  # Ensure exact length
+                video_frames = video_frames[: self.n_frames]  # Ensure exact length
                 video = torch.stack(video_frames, 0)
 
                 label_start_idx = start_frame
@@ -98,7 +110,7 @@ class VideoDataset(torch.utils.data.Dataset):
 
                 return data
 
-            idx -= (n_total_frames - (self.n_frames - 1))
+            idx -= n_total_frames - (self.n_frames - 1)
 
         raise IndexError("Index out of range")
 
