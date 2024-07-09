@@ -35,7 +35,7 @@ def parse_args():
         type=str,
         default="full",
         help="Dataset mode",
-        choices=["full", "iter"],
+        choices=["full", "iter", "frame"],
     )
 
     parser.add_argument(
@@ -63,7 +63,7 @@ def parse_args():
         "--return_bbox_size", action="store_true", help="Return bounding box size"
     )
     parser.add_argument(
-        "--num_workers", type=int, default=4, help="Number of workers for data loading"
+        "--num_workers", type=int, default=2, help="Number of workers for data loading"
     )
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
 
@@ -188,7 +188,7 @@ def main(args):
                 num_workers=args.num_workers,
                 # collate_fn=collate_fn
             )
-        elif args.dataset_mode == "full":
+        elif args.dataset_mode in ("full", "frame"):
             train_dataloader = DataLoader(
                 train_dataset,
                 batch_size=args.batch_size,
@@ -196,6 +196,9 @@ def main(args):
                 shuffle=True,
                 # collate_fn=collate_fn
             )
+        else:
+            raise ValueError(f"Unknown dataset mode: {args.dataset_mode}")
+
         val_dataloader = DataLoader(
             val_dataset,
             batch_size=args.batch_size,

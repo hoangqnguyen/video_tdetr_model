@@ -177,4 +177,4 @@ lightning_logs
 augmentation.ipynb
 checkpoints
 
-train.sh
+# train.sh

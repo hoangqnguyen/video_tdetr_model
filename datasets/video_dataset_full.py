@@ -45,72 +45,66 @@ class VideoDataset(torch.utils.data.Dataset):
             for video_path, _ in self.samples
         )
 
-        self.video_cache = {}  # Cache to store loaded videos
-
     def __len__(self):
         return self.total_frames - len(self.samples) * (self.n_frames - 1)
 
-    def _load_video(self, video_path):
-        """Helper function to load video into memory."""
-        if video_path in self.video_cache:
-            return self.video_cache[video_path]
-
-        vid = torchvision.io.VideoReader(video_path, "video")
-        self.video_cache[video_path] = vid
-        return vid
-
     def __getitem__(self, idx):
+        cumulative_count = 0
         for video_path, label_path in self.samples:
-            vid = self._load_video(video_path)
-            # vid = torchvision.io.VideoReader(video_path, "video")
+            vid = torchvision.io.VideoReader(video_path, "video")
             metadata = vid.get_metadata()
             duration = metadata["video"]["duration"][0]
             fps = metadata["video"]["fps"][0]
 
             n_total_frames = int(duration * fps)
 
-            if idx < n_total_frames - (self.n_frames - 1):
-                start_frame = idx
+            if cumulative_count <= idx < cumulative_count + n_total_frames - (self.n_frames - 1):
+                start_frame = idx - cumulative_count
                 video_frames = []  # video frame buffer
-                vid.seek(start_frame / fps)
-                for frame in itertools.islice(vid, self.n_frames):
-                    if self.frame_transform:
-                        _frame = self.frame_transform(frame["data"])
-                    else:
-                        _frame = frame["data"]
-                    video_frames.append(_frame)
+                try:
+                    vid.seek(start_frame / fps)
+                    for frame in itertools.islice(vid, self.n_frames):
+                        if self.frame_transform:
+                            _frame = self.frame_transform(frame["data"])
+                        else:
+                            _frame = frame["data"]
+                        video_frames.append(_frame)
 
-                # If we have less than n_frames, pad the sequence with zeros
-                if len(video_frames) < self.n_frames:
-                    padding_frames = [
-                        torch.zeros_like(video_frames[0])
-                        for _ in range(self.n_frames - len(video_frames))
-                    ]
-                    video_frames.extend(padding_frames)
+                    # If we have less than n_frames, pad the sequence with zeros
+                    if len(video_frames) < self.n_frames:
+                        padding_frames = [
+                            torch.zeros_like(video_frames[0])
+                            for _ in range(self.n_frames - len(video_frames))
+                        ]
+                        video_frames.extend(padding_frames)
 
-                video_frames = video_frames[: self.n_frames]  # Ensure exact length
-                video = torch.stack(video_frames, 0)
+                    video_frames = video_frames[:self.n_frames]  # Ensure exact length
+                    video = torch.stack(video_frames, 0)
 
-                label_start_idx = start_frame
+                    label_start_idx = start_frame 
 
-                data = load_label(
-                    label_path,
-                    normalize_labels=self.normalize_labels,
-                    calculate_velocity=self.calculate_velocity,
-                    start_idx=label_start_idx,
-                    end_idx=label_start_idx + self.n_frames,
-                    return_bbox_size=self.return_bbox_size,
-                    return_frame_resolution=self.return_frame_resolution,
-                )
+                    data = load_label(
+                        label_path,
+                        normalize_labels=self.normalize_labels,
+                        calculate_velocity=self.calculate_velocity,
+                        start_idx=label_start_idx,
+                        end_idx=label_start_idx + self.n_frames,
+                        return_bbox_size=self.return_bbox_size,
+                        return_frame_resolution=self.return_frame_resolution,
+                    )
 
-                if self.video_transform:
-                    video = self.video_transform(video)
+                    if self.video_transform:
+                        video = self.video_transform(video)
 
-                data["video"] = video
+                    data["video"] = video
 
-                return data
+                    return data
 
-            idx -= n_total_frames - (self.n_frames - 1)
+                except Exception as e:
+                    print(f"Error processing video {video_path} at frame {start_frame}: {e}")
+                    raise e
+
+            cumulative_count += n_total_frames - (self.n_frames - 1)
 
         raise IndexError("Index out of range")
 
