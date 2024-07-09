@@ -1,10 +1,5 @@
 #!/bin/bash
-
-# Define the main directory containing the subdirectories
-CHECKPOINT_DIR="checkpoints"
-
-# Collect all checkpoint paths
-CHECKPOINTS=$(ls $CHECKPOINT_DIR/*/*.ckpt)
+# This script runs the evaluation on all checkpoints in the checkpoints directory using the specified datasets below.
 
 # Define datasets and their corresponding data paths
 declare -A DATASETS
@@ -13,6 +8,12 @@ DATASETS["volleyball"]="data/volleyball/volleyball_mp4"
 
 # Define the output file for the results
 RESULTS_FILE="logs/eval.txt"
+
+# Define the main directory containing the subdirectories
+CHECKPOINT_DIR="checkpoints"
+
+# Collect all checkpoint paths
+CHECKPOINTS=$(ls $CHECKPOINT_DIR/*/*.ckpt)
 
 # Create the logs directory if it doesn't exist
 mkdir -p logs

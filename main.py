@@ -6,6 +6,7 @@ from datetime import datetime
 from models import build_model
 import pytorch_lightning as pl
 from datasets import build_dataset
+# from datasets.helpers import collate_fn
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -22,6 +23,9 @@ def parse_args():
         "--dataset", type=str, default="kovo_video", help="Dataset name"
     )
 
+    parser.add_argument("--dataset_mode", type=str, default="full",
+                        help="Dataset mode", choices=["full", "iter"])
+
     parser.add_argument(
         "--data_path",
         type=str,
@@ -34,7 +38,7 @@ def parse_args():
     parser.add_argument("--n_frames", type=int, default=4,
                         help="Number of frames")
     parser.add_argument("--epoch_size", type=int,
-                        default=4, help="Size of each epoch")
+                        default=None, help="Size of each epoch")
     parser.add_argument("--random_seed", type=int,
                         default=42, help="Random seed")
 
@@ -135,13 +139,14 @@ def parse_args():
 
 
 def main(args):
-    model = build_model(args)
     test_dataset = build_dataset(args.dataset, "test", args)
     test_dataloader = DataLoader(
-        test_dataset, batch_size=args.batch_size, num_workers=args.num_workers
+        test_dataset, batch_size=args.batch_size, num_workers=args.num_workers,
+        # collate_fn=collate_fn
     )
 
     if args.mode == "train":
+        model = build_model(args)
         # Get the current timestamp
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -163,10 +168,12 @@ def main(args):
         val_dataset = build_dataset(args.dataset, "val", args)
 
         train_dataloader = DataLoader(
-            train_dataset, batch_size=args.batch_size, num_workers=args.num_workers
+            train_dataset, batch_size=args.batch_size, num_workers=args.num_workers,
+            # collate_fn=collate_fn
         )
         val_dataloader = DataLoader(
-            val_dataset, batch_size=args.batch_size, num_workers=args.num_workers
+            val_dataset, batch_size=args.batch_size, num_workers=args.num_workers,
+            # collate_fn=collate_fn
         )
 
         tb_logger = pl_loggers.TensorBoardLogger(
@@ -203,6 +210,15 @@ def main(args):
         )
         args.eval_checkpoint_path = checkpoint_callback.best_model_path
 
+    elif args.mode == "eval":
+        # read args from checkpoint dir
+        with open(os.path.join(os.path.dirname(args.eval_checkpoint_path), "args.json"), "r") as f:
+            skip_keys = ["mode", "eval_checkpoint_path", "dataset", "data_path", "epoch_size", "batch_size"]
+            args.__dict__.update(
+                {k: v for k, v in json.load(f).items() if k not in skip_keys}
+            )
+        model = build_model(args)
+
     # Evaluate the model
     eval(model, args.eval_checkpoint_path, test_dataloader, args)
 
@@ -210,9 +226,9 @@ def main(args):
 def eval(model, checkpoint_dir, test_dataloader, args):
     best_model = model.__class__.load_from_checkpoint(
         checkpoint_dir,
-        backbone=model.backbone,
+        backbone=args.backbone,
         transformer=model.transformer,
-        num_queries=model.num_queries,
+        num_queries=getattr(model, "num_queries", None),
         n_frames=model.n_frames,
         use_temporal_encodings=args.use_temporal_encodings,
     )

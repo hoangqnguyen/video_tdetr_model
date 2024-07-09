@@ -12,7 +12,12 @@ def _init_conv(conv):
         nn.init.constant_(conv.bias, 0)
 
 
-def _init_linear(emb):
+def _init_linear(lin):
+    nn.init.xavier_normal_(lin.weight)
+    if lin.bias is not None:
+        torch.nn.init.zeros_(lin.bias)
+
+def _init_embedding(emb):
     nn.init.xavier_uniform_(emb.weight)
 
 
@@ -149,7 +154,7 @@ class DetectionHead(nn.Module):
 
     def forward(self, x):
         classes = self.class_embed(x)
-        boxes = self.bbox_embed(x)
+        boxes = self.bbox_embed(x).sigmoid()
         return classes, boxes
 
 
@@ -158,8 +163,9 @@ class VideoObjectDetection(pl.LightningModule):
         self,
         backbone="resnet18",
         d_model=256,
-        num_classes=91,
-        box_dim=4,
+        num_classes=1,
+        box_dim=2,
+        num_queries=3, n_frames=4,
         optimizer="adam",
         lr=1e-4,
         lr_backbone=1e-5,
@@ -168,30 +174,54 @@ class VideoObjectDetection(pl.LightningModule):
         **kwargs,
     ):
         super(VideoObjectDetection, self).__init__()
+
+        self.d_model = d_model
+        self.num_queries = num_queries
+        self.n_frames = n_frames
+        
         self.optimizer = optimizer
         self.lr = lr
         self.lr_backbone = lr_backbone
         self.class_loss_coef = class_loss_coef
         self.box_loss_coef = box_loss_coef
-        self.backbone = TemporalBackbone(backbone=backbone, out_dim=d_model)
+        if type(backbone) == str:
+            self.backbone = TemporalBackbone(backbone=backbone, out_dim=d_model)
+        elif isinstance(backbone, TemporalBackbone):
+            self.backbone = backbone
         self.transformer = MultiFrameTransformer(d_model=d_model)
         self.detection_head = DetectionHead(
             d_model=d_model, num_classes=num_classes, box_dim=box_dim
         )
+
+        self.query_embed = nn.Embedding(num_queries, d_model)
+        self.temporal_pos_encoder = TemporalPositionEncoding(d_model)
+
+        _init_embedding(self.query_embed)
+
 
     def forward(self, x):
         features = self.backbone(x)
         B, T, C = features.shape
 
         # Prepare src and tgt for the transformer
-        src = features.permute(1, 0, 2)  # (T, B, d_model)
+        # src = features.permute(1, 0, 2)  # (T, B, d_model)
+        src = self.temporal_pos_encoder(features.permute(1, 0, 2))  # (T, B, d_model)
 
-        tgt = torch.zeros_like(src)  # Example target, can be adjusted as needed
+        # tgt = torch.zeros_like(src)  # Example target, can be adjusted as needed
+       
+        # Prepare query embeddings for each frame
+        query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, B, 1)  # (num_queries, B, d_model)
+        query_embed = query_embed.unsqueeze(0).repeat(T, 1, 1, 1)  # (T, num_queries, B, d_model)
+        query_embed = query_embed.view(T * self.num_queries, B, -1)  # (T * num_queries, B, d_model)
 
-        transformer_output = self.transformer(src, tgt)
-        transformer_output = transformer_output.permute(1, 0, 2)  # (B, T, d_model)
+        # Pass through the transformer
+        transformer_output = self.transformer(src, query_embed)  # (T * num_queries, B, d_model)
 
-        classes, boxes = self.detection_head(transformer_output)
+        # Reshape transformer output to (B, T, num_queries, d_model)
+        transformer_output = transformer_output.view(T, self.num_queries, B, -1).permute(2, 0, 1, 3)  # (B, T, num_queries, d_model)
+
+        # Pass through the detection head
+        classes, boxes = self.detection_head(transformer_output)  # (B, T, num_queries, num_classes), (B, T, num_queries, box_dim)
         out = {"pred_logits": classes, "pred_boxes": boxes}
         return out
 
@@ -201,7 +231,7 @@ class VideoObjectDetection(pl.LightningModule):
         loss_dict = self.compute_loss(outputs, targets)
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
@@ -256,8 +286,22 @@ class VideoObjectDetection(pl.LightningModule):
 
     def decompose(self, batch):
         frames = batch["video"]
-        _class = batch["class"].unsqueeze(-1)
-        center_xy = batch["center_xy"]
+        
+        _class = (
+            batch["class"] # (b, t)
+            # .flatten(0, 1)
+            .unsqueeze(2)
+            .repeat(1, 1, self.num_queries)
+            .unsqueeze(-1)
+        )
+        
+        center_xy = (
+            batch["center_xy"]
+            # .flatten(0, 1)
+            .unsqueeze(
+                2).repeat(1,1, self.num_queries, 1)
+        )
+
         if frames.dim() < 5:
             frames = frames.unsqueeze(0)
 
@@ -267,7 +311,12 @@ class VideoObjectDetection(pl.LightningModule):
         }
 
         if "velocity_xy" in batch:
-            targets["velocity_xy"] = batch["velocity_xy"]
+            targets["velocity_xy"] = (
+                batch["velocity_xy"]
+                # .flatten(0, 1)
+                .unsqueeze(2)
+                .repeat(2, self.num_queries, 1)
+            )
 
         return frames, targets
 
