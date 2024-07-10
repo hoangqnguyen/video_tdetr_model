@@ -13,6 +13,26 @@ def _init_linear(lin):
         torch.nn.init.zeros_(lin.bias)
 
 
+class MLP(nn.Module):
+    """Very simple multi-layer perceptron (also called FFN)"""
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        h = [hidden_dim] * (num_layers - 1)
+        self.layers = nn.ModuleList(
+            nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim])
+        )
+
+        for i, layer in enumerate(self.layers):
+            _init_linear(layer)
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x
+
+
 class MaxVitDetection(pl.LightningModule):
     def __init__(
         self,
@@ -33,17 +53,16 @@ class MaxVitDetection(pl.LightningModule):
         self.class_loss_coef = class_loss_coef
         self.box_loss_coef = box_loss_coef
 
-        maxvit_t = torchvision.models.maxvit_t(
-            weights="MaxVit_T_Weights.IMAGENET1K_V1"
-        )
+        maxvit_t = torchvision.models.maxvit_t(weights="MaxVit_T_Weights.IMAGENET1K_V1")
         self.backbone = create_feature_extractor(
             maxvit_t, return_nodes={"classifier.4": "features"}
         )
         out_features = self.backbone.classifier._modules["3"].out_features
         self.class_emb = nn.Linear(out_features, num_classes)
-        self.bbox_emb = nn.Linear(out_features, box_dim)
+        # self.bbox_emb = nn.Linear(out_features, box_dim)
+        self.bbox_emb = MLP(out_features, out_features, box_dim, 3)
         _init_linear(self.class_emb)
-        _init_linear(self.bbox_emb)
+
 
     def forward(self, x):
         """

@@ -14,7 +14,8 @@ CHECKPOINT_DIR="checkpoints"
 
 # Collect all checkpoint paths
 # CHECKPOINTS=$(ls $CHECKPOINT_DIR/*/*.ckpt)
-CHECKPOINTS="checkpoints/tdetr2_queries_frameds_resnet50_hidden_256_volleyball_20240709-220029/tdetr2_volleyball_20240709-220029.ckpt"
+# CHECKPOINTS="checkpoints/tdetr2_queries_frameds_resnet50_hidden_256_volleyball_20240709-220029/tdetr2_volleyball_20240709-220029.ckpt"
+CHECKPOINTS="checkpoints/maxvit_frameds_resnet50_hidden_256_volleyball_20240710-165825/maxvit_volleyball_20240710-165825.ckpt"
 
 
 # Create the logs directory if it doesn't exist

@@ -19,7 +19,7 @@ data_paths=("data/volleyball/volleyball_mp4")
 model_names=("maxvit")
 
 # Define single values for epochs, batch size, and epoch size
-epochs=10
+epochs=100
 batch_size=8
 epoch_size=10000 # only used for iter dataset mode, ignored otherwise
 # dataset_mode="full"

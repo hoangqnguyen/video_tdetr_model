@@ -10,7 +10,7 @@ from datasets import build_dataset
 # from datasets.helpers import collate_fn
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, RichProgressBar
 
 warnings.filterwarnings("ignore")
 
@@ -150,13 +150,6 @@ def parse_args():
 
 
 def main(args):
-    test_dataset = build_dataset(args.dataset, "test", args)
-    test_dataloader = DataLoader(
-        test_dataset,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        # collate_fn=collate_fn
-    )
 
     if args.mode == "train":
         model = build_model(args)
@@ -229,6 +222,7 @@ def main(args):
             ],
             callbacks=[
                 checkpoint_callback,
+                RichProgressBar(),
             ],
             accumulate_grad_batches=args.accumulate_grad_batches,
         )
@@ -258,6 +252,13 @@ def main(args):
             )
         model = build_model(args)
 
+    test_dataset = build_dataset(args.dataset, "test", args)
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        # collate_fn=collate_fn
+    )
     # Evaluate the model
     eval(model, args.eval_checkpoint_path, test_dataloader, args)
 
@@ -266,9 +267,9 @@ def eval(model, checkpoint_dir, test_dataloader, args):
     best_model = model.__class__.load_from_checkpoint(
         checkpoint_dir,
         backbone=args.backbone,
-        transformer=model.transformer,
+        transformer=getattr(model, "transformer", None),
         num_queries=getattr(model, "num_queries", None),
-        n_frames=model.n_frames,
+        n_frames=getattr(model, "n_frames", 1),
         use_temporal_encodings=args.use_temporal_encodings,
     )
     best_model.evaluate(test_dataloader, args.imgsz)
