@@ -73,7 +73,7 @@ def parse_args():
         type=str,
         default="tdetr",
         help="Model name",
-        choices=["tdetr", "tdetr2"],
+        choices=["tdetr", "tdetr2", "maxvit"],
     )
     parser.add_argument("--device", type=str, default="cuda", help="Device to use")
     parser.add_argument(
