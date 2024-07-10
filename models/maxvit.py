@@ -4,6 +4,7 @@ import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
+from x_transformers import Decoder
 from torchvision.models.feature_extraction import create_feature_extractor
 
 
@@ -11,6 +12,10 @@ def _init_linear(lin):
     nn.init.xavier_normal_(lin.weight)
     if lin.bias is not None:
         torch.nn.init.zeros_(lin.bias)
+
+
+def _init_embedding(emb):
+    nn.init.xavier_uniform_(emb.weight)
 
 
 class MLP(nn.Module):
@@ -33,6 +38,39 @@ class MLP(nn.Module):
         return x
 
 
+class MaxViT_Encoder(nn.Module):
+    def __init__(self, stack_immidiate_outputs=False):
+        super().__init__()
+
+        maxvit_t = torchvision.models.maxvit_t(weights="MaxVit_T_Weights.IMAGENET1K_V1")
+        self.backbone = create_feature_extractor(
+            maxvit_t,
+            return_nodes={
+                "blocks.0": "0",
+                "blocks.1": "1",
+                "blocks.2": "2",
+                "blocks.3": "3",
+            },
+        )
+        self.out_dim = 960 if stack_immidiate_outputs else 512
+        self.stack_immdiate_outputs = stack_immidiate_outputs
+        if self.stack_immdiate_outputs:
+            self.max_pool0 = nn.MaxPool2d(8)
+            self.max_pool1 = nn.MaxPool2d(4)
+            self.max_pool2 = nn.MaxPool2d(2)
+
+    def forward(self, x):
+        features = self.backbone(x)
+        if not self.stack_immdiate_outputs:
+            return features["3"]
+        x0 = self.max_pool0(features["0"])
+        x1 = self.max_pool1(features["1"])
+        x2 = self.max_pool2(features["2"])
+        x3 = features["3"]
+        out = torch.cat([x0, x1, x2, x3], dim=1)
+        return out
+
+
 class MaxVitDetection(pl.LightningModule):
     def __init__(
         self,
@@ -43,9 +81,19 @@ class MaxVitDetection(pl.LightningModule):
         lr_backbone=1e-5,
         class_loss_coef=1,
         box_loss_coef=5,
+        num_queries=1,
+        multiscale_features=True,
+        decoder_depth=6,
+        decoder_heads=8,
+        n_frames=1,
         **kwargs,
     ):
         super(MaxVitDetection, self).__init__()
+
+        self.num_classes = num_classes
+        self.box_dim = box_dim
+        self.num_queries = num_queries
+        self.multiscale_features = multiscale_features
 
         self.optimizer = optimizer
         self.lr = lr
@@ -53,16 +101,22 @@ class MaxVitDetection(pl.LightningModule):
         self.class_loss_coef = class_loss_coef
         self.box_loss_coef = box_loss_coef
 
-        maxvit_t = torchvision.models.maxvit_t(weights="MaxVit_T_Weights.IMAGENET1K_V1")
-        self.backbone = create_feature_extractor(
-            maxvit_t, return_nodes={"classifier.4": "features"}
-        )
-        out_features = self.backbone.classifier._modules["3"].out_features
-        self.class_emb = nn.Linear(out_features, num_classes)
-        # self.bbox_emb = nn.Linear(out_features, box_dim)
-        self.bbox_emb = MLP(out_features, out_features, box_dim, 3)
-        _init_linear(self.class_emb)
+        self.backbone = MaxViT_Encoder(stack_immidiate_outputs=True)
+        hidden_dim = self.backbone.out_dim
 
+        self.decoder = Decoder(
+            dim=hidden_dim,
+            depth=decoder_depth,
+            heads=decoder_heads,
+            cross_attend=True,
+            attn_flash=True,  # just set this to True if you have pytorch 2.0 installed
+        )
+        self.class_emb = nn.Linear(hidden_dim, num_classes)
+        self.bbox_emb = MLP(hidden_dim, hidden_dim, box_dim, 3)
+        self.query_embed = nn.Embedding(num_queries, hidden_dim // n_frames)
+
+        _init_linear(self.class_emb)
+        _init_embedding(self.query_embed)
 
     def forward(self, x):
         """
@@ -71,9 +125,17 @@ class MaxVitDetection(pl.LightningModule):
         """
         B, T, C, H, W = x.shape
         x = x.view(B * T, C, H, W)
-        x = self.backbone(x)
-        class_emb = self.class_emb(x["features"])
-        bbox_emb = self.bbox_emb(x["features"]).sigmoid()
+
+        context = self.backbone(x).flatten(2).permute(0, 2, 1)
+
+        object_queries = self.query_embed.weight.unsqueeze(0).repeat(
+            B * T, 1, 1
+        )  # b, q, c
+
+        hs = self.decoder(object_queries, context=context)
+
+        class_emb = self.class_emb(hs)
+        bbox_emb = self.bbox_emb(hs).sigmoid()
 
         outputs = {
             "pred_logits": class_emb.view(B, T, -1),
