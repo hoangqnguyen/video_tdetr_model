@@ -47,11 +47,13 @@ def parse_args():
     parser.add_argument(
         "--imgsz", type=int, nargs=2, default=(256, 256), help="Image size"
     )
-    parser.add_argument("--n_frames", type=int, default=4, help="Number of frames")
+    parser.add_argument("--n_frames", type=int, default=4,
+                        help="Number of frames")
     parser.add_argument(
         "--epoch_size", type=int, default=None, help="Size of each epoch"
     )
-    parser.add_argument("--random_seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--random_seed", type=int,
+                        default=42, help="Random seed")
 
     parser.add_argument(
         "--calculate_velocity", action="store_true", help="Calculate velocity"
@@ -73,16 +75,18 @@ def parse_args():
         type=str,
         default="tdetr",
         help="Model name",
-        choices=["tdetr", "tdetr2", "maxvit"],
+        choices=["tdetr", "tdetr2", "maxvit", "maxvit2",],
     )
-    parser.add_argument("--device", type=str, default="cuda", help="Device to use")
+    parser.add_argument("--device", type=str,
+                        default="cuda", help="Device to use")
     parser.add_argument(
         "--position_embedding", type=str, default="sine", help="Position embedding type"
     )
     parser.add_argument(
         "--hidden_dim", type=int, default=256, help="Hidden dimension size"
     )
-    parser.add_argument("--optimizer", type=str, default="adam", help="Optimizer")
+    parser.add_argument("--optimizer", type=str,
+                        default="adam", help="Optimizer")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument(
         "--lr_backbone", type=float, default=1e-5, help="Learning rate for backbone"
@@ -94,9 +98,12 @@ def parse_args():
     parser.add_argument(
         "--dilation", action="store_true", help="Use dilated convolutions"
     )
-    parser.add_argument("--epochs", type=int, default=2, help="Number of epochs")
-    parser.add_argument("--num_queries", type=int, default=3, help="Number of queries")
-    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
+    parser.add_argument("--epochs", type=int, default=2,
+                        help="Number of epochs")
+    parser.add_argument("--num_queries", type=int,
+                        default=3, help="Number of queries")
+    parser.add_argument("--dropout", type=float,
+                        default=0.1, help="Dropout rate")
     parser.add_argument(
         "--nheads", type=int, default=8, help="Number of attention heads"
     )
@@ -237,7 +244,8 @@ def main(args):
     elif args.mode == "eval":
         # read args from checkpoint dir
         with open(
-            os.path.join(os.path.dirname(args.eval_checkpoint_path), "args.json"), "r"
+            os.path.join(os.path.dirname(
+                args.eval_checkpoint_path), "args.json"), "r"
         ) as f:
             skip_keys = [
                 "mode",
