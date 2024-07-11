@@ -42,7 +42,8 @@ class MaxViT_Encoder(nn.Module):
     def __init__(self, stack_immidiate_outputs=False):
         super().__init__()
 
-        maxvit_t = torchvision.models.maxvit_t(weights="MaxVit_T_Weights.IMAGENET1K_V1")
+        maxvit_t = torchvision.models.maxvit_t(
+            weights="MaxVit_T_Weights.IMAGENET1K_V1")
         self.backbone = create_feature_extractor(
             maxvit_t,
             return_nodes={
@@ -111,9 +112,9 @@ class MaxVitDetection(pl.LightningModule):
             cross_attend=True,
             attn_flash=True,  # just set this to True if you have pytorch 2.0 installed
         )
-        self.class_emb = nn.Linear(hidden_dim, num_classes)
-        self.bbox_emb = MLP(hidden_dim, hidden_dim, box_dim, 3)
         self.query_embed = nn.Embedding(num_queries, hidden_dim // n_frames)
+        self.class_emb = nn.Linear(hidden_dim, num_classes+1)
+        self.bbox_emb = MLP(hidden_dim, hidden_dim, box_dim, 3)
 
         _init_linear(self.class_emb)
         _init_embedding(self.query_embed)
@@ -166,6 +167,8 @@ class MaxVitDetection(pl.LightningModule):
     def configure_optimizers(self):
         params = [
             {"params": self.backbone.parameters(), "lr": self.lr_backbone},
+            {"params": self.decoder.parameters()},
+            {"params": self.query_embed.parameters()},
             {"params": self.class_emb.parameters()},
             {"params": self.bbox_emb.parameters()},
         ]
@@ -187,9 +190,13 @@ class MaxVitDetection(pl.LightningModule):
         target_center_xy = targets["center_xy"]
 
         # Cross Entropy Loss for classification
-        loss_class = F.binary_cross_entropy_with_logits(pred_logits, target_class)
+        # loss_class = F.binary_cross_entropy_with_logits(pred_logits, target_class)
+        loss_class = F.cross_entropy(
+            pred_logits.flatten(0, -2), target_class.flatten())
         # L1 Loss for bounding box coordinates
-        loss_boxes = F.l1_loss(target_class * pred_boxes, target_center_xy)
+        # print(target_class.shape, pred_boxes.shape, target_center_xy.shape)
+        loss_boxes = F.l1_loss(target_class.unsqueeze(-1)
+                               * pred_boxes, target_center_xy)
         # * target_class to mask out the background class
 
         loss = self.class_loss_coef * loss_class + self.box_loss_coef * loss_boxes / (
@@ -205,7 +212,7 @@ class MaxVitDetection(pl.LightningModule):
     def decompose(self, batch):
         frames = batch["video"]
 
-        _class = batch["class"].unsqueeze(-1)
+        _class = batch["class"].to(torch.long)
 
         center_xy = batch["center_xy"]
 
@@ -242,7 +249,8 @@ class MaxVitDetection(pl.LightningModule):
             for batch in dataloader:
                 inputs, targets = self.decompose(batch)
                 outputs = self(inputs.to(self.device))
-                distance = self.compute_location_error(outputs, targets, imgsz).cpu()
+                distance = self.compute_location_error(
+                    outputs, targets, imgsz).cpu()
                 all_distance = torch.cat((all_distance, distance))
                 total_error += distance.sum().item()
                 count += distance.numel()
