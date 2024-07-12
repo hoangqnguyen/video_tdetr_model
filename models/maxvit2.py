@@ -7,8 +7,13 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 from x_transformers import Decoder
 from .maxvit_core import maxvit_tiny_tf_512 as core
-from torchvision.models.feature_extraction import create_feature_extractor
 from positional_encodings.torch_encodings import PositionalEncoding2D, PositionalEncoding3D, Summer
+
+
+def _init_conv(conv):
+    nn.init.normal_(conv.weight, std=0.01, mean=0.0)
+    if conv.bias is not None:
+        nn.init.constant_(conv.bias, 0)
 
 
 def _init_linear(lin):
@@ -85,6 +90,7 @@ class MaxVit_Detection2(pl.LightningModule):
         self,
         num_classes=1,
         box_dim=2,
+        hidden_dim=256,
         optimizer="adamw",
         lr=1e-4,
         lr_backbone=1e-5,
@@ -114,7 +120,9 @@ class MaxVit_Detection2(pl.LightningModule):
         self.box_loss_coef = box_loss_coef
 
         self.backbone = MaxViT_Encoder(stack_immidiate_outputs=True)
-        hidden_dim = self.backbone.out_dim
+
+        self.input_proj = nn.Conv2d(
+            self.backbone.out_dim, hidden_dim, kernel_size=1)
 
         self.decoder = Decoder(
             dim=hidden_dim,
@@ -132,6 +140,7 @@ class MaxVit_Detection2(pl.LightningModule):
         self.bbox_embed = MLP(hidden_dim, hidden_dim, box_dim, 3)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)  # q, c
 
+        _init_conv(self.input_proj)
         _init_linear(self.class_embed)
         _init_embedding(self.query_embed)
 
@@ -147,6 +156,7 @@ class MaxVit_Detection2(pl.LightningModule):
             bs, t, c, h, w = src.shape
             src = src.flatten(0, 1)  # bs*t, c, h, w
             context = self.backbone(src)  # b*t, c, h, w
+            context = self.input_proj(context)
             context = rearrange(context, "(b t) c h w -> b t h w c", b=bs, t=t)
             context_with_pos = self.pos_encoder(
                 context).flatten(1, 3)  # b, t*h*w, c
@@ -156,15 +166,14 @@ class MaxVit_Detection2(pl.LightningModule):
         elif src.ndim == 4:
             bs, c, h, w = src.shape
             context = self.backbone(src).permute(0, 2, 3, 1)  # b, h, w, c
+            context = self.input_proj(context)
             context_with_pos = self.pos_encoder(
                 context).flatten(1, 2)  # b, h*w, c
             object_queries = self.query_embed.weight.unsqueeze(
                 0).repeat(bs, 1, 1)  # b, q, c
 
-        # print(f"context_with_pos.shape: {context_with_pos.shape}")
-        # print(f"object_queries.shape: {object_queries.shape}")
-
-        hs = self.decoder(object_queries, context=context_with_pos)
+        hs = self.decoder(
+            object_queries, context=context_with_pos)
 
         outputs_class = self.class_embed(hs)
         outputs_coord = self.bbox_embed(hs).sigmoid()
@@ -321,5 +330,6 @@ def build_model(args):
         decoder_heads=args.nheads,
         num_queries=args.num_queries,
         n_frames=args.n_frames,
+        hidden_dim=args.hidden_dim
     )
     return model

@@ -1,5 +1,5 @@
 
-backbones=("resnet50")
+backbones=("maxvit")
 hidden_dims=(256)
 
 additional_suffix="frameds"
@@ -13,10 +13,10 @@ data_paths=("data/volleyball/volleyball_mp4")
 # model_names=("tdetr2" "tdetr")
 model_names=("maxvit2")
 epochs=50
-batch_size=8
+batch_size=2
 dataset_mode="frame"
 optim="adamw"
-accumulate_grad_batches=8
+accumulate_grad_batches=16
 imgz=512
 
 # define image size of 224 by 224
